@@ -1,29 +1,37 @@
 {
   "expo": {
     "name": "HabitFlow",
-    "slug": "HabitFlow",
+    "slug": "habitflow",
     "version": "1.0.0",
     "orientation": "portrait",
+    "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
-    "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash-icon.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#ffffff"
+    "splash": { "backgroundColor": "#0A0A0F" },
+    "android": {
+      "package": "com.arjun.habitflow",
+      "versionCode": 1,
+      "compileSdkVersion": 34,
+      "targetSdkVersion": 34,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0A0A0F"
+      },
+      "permissions": [
+        "RECEIVE_BOOT_COMPLETED",
+        "SCHEDULE_EXACT_ALARM",
+        "USE_EXACT_ALARM",
+        "VIBRATE",
+        "INTERNET",
+        "ACCESS_NETWORK_STATE"
+      ]
     },
     "ios": {
-      "supportsTablet": true
+      "bundleIdentifier": "com.arjun.habitflow",
+      "buildNumber": "1"
     },
-    "android": {
-      "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
-        "foregroundImage": "./assets/android-icon-foreground.png",
-        "backgroundImage": "./assets/android-icon-background.png",
-        "monochromeImage": "./assets/android-icon-monochrome.png"
-      }
-    },
-    "web": {
-      "favicon": "./assets/favicon.png"
-    }
+    "plugins": [
+      "expo-sensors",
+      ["expo-notifications", { "icon": "./assets/icon.png", "color": "#00E5CC" }]
+    ]
   }
 }
