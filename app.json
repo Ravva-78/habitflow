@@ -6,7 +6,9 @@
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
     "icon": "./assets/icon.png",
-    "splash": { "backgroundColor": "#0A0A0F" },
+    "splash": {
+      "backgroundColor": "#0A0A0F"
+    },
     "android": {
       "package": "com.arjun.habitflow",
       "versionCode": 1,
@@ -31,7 +33,18 @@
     },
     "plugins": [
       "expo-sensors",
-      ["expo-notifications", { "icon": "./assets/icon.png", "color": "#00E5CC" }]
-    ]
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#00E5CC"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "6a9acb2e-b326-44d7-a790-99fcb21e20f6"
+      }
+    }
   }
 }

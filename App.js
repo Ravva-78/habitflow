@@ -15,7 +15,22 @@ import OnboardingScreen   from './src/screens/OnboardingScreen';
 import ErrorBoundary      from './src/components/ErrorBoundary';
 import { Colors, Radius } from './src/theme';
 
+import { db } from './firebase';
+import { collection, addDoc } from 'firebase/firestore';
+
+
 const Tab = createBottomTabNavigator();
+const testFirebase = async () => {
+  try {
+    await addDoc(collection(db, "testCollection"), {
+      message: "Hello from HabitFlow 🚀",
+      timestamp: new Date()
+    });
+    console.log("✅ Data sent to Firebase!");
+  } catch (error) {
+    console.log("❌ Firebase error:", error);
+  }
+};
 const ONBOARDING_KEY = 'hf_onboarded';
 
 const TABS = {

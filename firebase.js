@@ -5,12 +5,12 @@ import { initializeApp } from 'firebase/app';
 import { getFirestore } from 'firebase/firestore';
 
 const firebaseConfig = {
-  apiKey:            "YOUR_API_KEY",
-  authDomain:        "YOUR_PROJECT.firebaseapp.com",
-  projectId:         "YOUR_PROJECT_ID",
-  storageBucket:     "YOUR_PROJECT.appspot.com",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId:             "YOUR_APP_ID",
+  apiKey: "AIzaSyDIz0Tj6BNy9XaxNTSS8miuvkfNV2xnHbE",
+  authDomain: "habitflow-62ab0.firebaseapp.com",
+  projectId: "habitflow-62ab0",
+  storageBucket: "habitflow-62ab0.firebasestorage.app",
+  messagingSenderId: "118159026010",
+  appId: "1:118159026010:web:05a9bc684885e54bf9b563",
 };
 
 const app = initializeApp(firebaseConfig);
