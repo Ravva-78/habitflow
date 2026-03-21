@@ -4,7 +4,7 @@ const ENV = {
     API_URL: 'http://192.168.1.100:3000', // change to your local IP for dev
   },
   production: {
-    API_URL: 'https://habitflow-production-0efc.up.railway.app', // ✅ https:// added
+    API_URL: 'https://habitflow-production-0efc.up.railway.app/', // ✅ https:// added
   },
 };
 
