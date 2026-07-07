@@ -4,3 +4,16 @@ services:
     env: static
     buildCommand: npm install && npx expo export -p web
     staticPublishPath: ./dist
+
+  - type: web
+    name: habitflow-backend
+    env: node
+    plan: free
+    rootDir: server
+    buildCommand: npm install
+    startCommand: node index.js
+    envVars:
+      - key: ANTHROPIC_API_KEY
+        sync: false
+      - key: NODE_ENV
+        value: production

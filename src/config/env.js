@@ -1,14 +1,10 @@
-// src/config/env.js
-const ENV = {
-  dev: {
-    API_URL: 'http://192.168.1.100:3000', // change to your local IP for dev
-  },
-  production: {
-    API_URL: 'https://habitflow-production-0efc.up.railway.app/', // ✅ https:// added
-  },
-};
+// After Render deploys, replace PROD_URL with the actual service URL.
+// Find it in: Render dashboard → habitflow-backend service → top of page.
+// Format is: https://habitflow-backend.onrender.com  (no trailing slash)
 
 const IS_PRODUCTION = true;
 
-export const API_URL = IS_PRODUCTION ? ENV.production.API_URL : ENV.dev.API_URL;
-export const COACH_ENDPOINT = `${API_URL}/api/coach`;
+const DEV_URL  = 'http://10.0.2.2:3000';
+const PROD_URL = 'https://REPLACE_WITH_RENDER_URL_AFTER_DEPLOY.onrender.com';
+
+export const API_BASE_URL = IS_PRODUCTION ? PROD_URL : DEV_URL;
