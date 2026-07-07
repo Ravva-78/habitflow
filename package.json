@@ -29,7 +29,11 @@
     "react-native-screens": "~4.23.0",
     "react-native-svg": "15.15.3",
     "react-native-web": "^0.21.0",
-    "zustand": "^5.0.14"
+    "zustand": "^4.5.2"
   },
-  "private": true
+  "private": true,
+  "devDependencies": {
+    "@babel/plugin-proposal-export-namespace-from": "^7.18.9",
+    "@expo/metro-runtime": "^55.0.11"
+  }
 }

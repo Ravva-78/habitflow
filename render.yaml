@@ -1,0 +1,6 @@
+services:
+  - type: web
+    name: habitflow-web
+    env: static
+    buildCommand: npm install && npx expo export -p web
+    staticPublishPath: ./dist
