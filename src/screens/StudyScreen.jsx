@@ -1,14 +1,14 @@
+// src/screens/StudyScreen.jsx
+// Upgraded to Zustand & React Native Reanimated
+
 import React, { useState, useEffect } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, TextInput, Modal, Alert, KeyboardAvoidingView, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format, differenceInDays } from 'date-fns';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import Animated, { FadeInDown, FadeIn, Layout } from 'react-native-reanimated';
+import { useStore } from '../store/useStore';
 import { Colors, Spacing, Radius, Typography } from '../theme';
 
-const SUBJECTS_KEY = 'hf_subjects';
-const SESSIONS_KEY = 'hf_study_sessions';
-const EXAMS_KEY    = 'hf_exams';
-const JOURNAL_KEY  = 'hf_journal_';
 const SUBJECT_COLORS = ['#00E5CC','#7B61FF','#4DA6FF','#00E5A0','#FFB800','#FF61DC','#FF5E5E','#9B6DFF'];
 
 const PROMPTS = {
@@ -22,14 +22,24 @@ export default function StudyScreen() {
   const [tab, setTab] = useState('journal');
   const today = format(new Date(), 'yyyy-MM-dd');
 
+  // Zustand
+  const subjects = useStore(state => state.subjects);
+  const sessions = useStore(state => state.studySessions);
+  const exams = useStore(state => state.exams);
+  const journalState = useStore(state => state.journal);
+  
+  const addSubjectZustand = useStore(state => state.addSubject);
+  const logStudySession = useStore(state => state.logStudySession);
+  const addExamZustand = useStore(state => state.addExam);
+  const deleteExam = useStore(state => state.deleteExam);
+  const saveJournalZustand = useStore(state => state.saveJournal);
+
   // Journal
   const [jMode, setJMode]   = useState('morning');
   const [jData, setJData]   = useState({ morning:['','',''], night:['','',''], braindump:'' });
-  const [jSaved, setJSaved] = useState(false);
+  const [jSaved, setJSaved] = useState(true);
 
   // Study
-  const [subjects, setSubjects]   = useState([]);
-  const [sessions, setSessions]   = useState([]);
   const [showSub, setShowSub]     = useState(false);
   const [showLog, setShowLog]     = useState(false);
   const [newSubName, setNewSubName] = useState('');
@@ -39,58 +49,44 @@ export default function StudyScreen() {
   const [sNote, setSNote]         = useState('');
 
   // Exams
-  const [exams, setExams]         = useState([]);
   const [showExam, setShowExam]   = useState(false);
   const [examForm, setExamForm]   = useState({name:'',subject:'',date:'',notes:''});
 
   useEffect(() => {
-    AsyncStorage.getItem(JOURNAL_KEY+today).then(d => { if (d) { setJData(JSON.parse(d)); setJSaved(true); } });
-    AsyncStorage.getItem(SUBJECTS_KEY).then(d => { if (d) setSubjects(JSON.parse(d)); });
-    AsyncStorage.getItem(SESSIONS_KEY).then(d => { if (d) setSessions(JSON.parse(d)); });
-    AsyncStorage.getItem(EXAMS_KEY).then(d => { if (d) setExams(JSON.parse(d)); });
-  }, []);
+    if (journalState[today]) {
+      setJData(journalState[today]);
+      setJSaved(true);
+    }
+  }, [journalState, today]);
 
-  const saveJournal = async () => {
-    await AsyncStorage.setItem(JOURNAL_KEY+today, JSON.stringify(jData));
+  const saveJournal = () => {
+    saveJournalZustand(today, jData);
     setJSaved(true);
     Alert.alert('Saved! 📝', 'Journal entry saved.');
   };
 
-  const addSubject = async () => {
+  const addSubject = () => {
     if (!newSubName.trim()) return;
     const s = { id: Date.now().toString(), name: newSubName.trim(), color: SUBJECT_COLORS[subjects.length % SUBJECT_COLORS.length], totalMins: 0 };
-    const u = [...subjects, s];
-    setSubjects(u);
-    await AsyncStorage.setItem(SUBJECTS_KEY, JSON.stringify(u));
+    addSubjectZustand(s);
     setNewSubName(''); setShowSub(false);
   };
 
-  const logSession = async () => {
+  const logSession = () => {
     if (!curSub) return;
     const mins = parseInt(sHours||'0')*60 + parseInt(sMins||'0');
     if (mins === 0) return;
     const sess = { id: Date.now().toString(), subjectId: curSub.id, subject: curSub.name, color: curSub.color, mins, note: sNote, date: format(new Date(),'dd MMM yyyy'), dateKey: today };
-    const u = [sess, ...sessions];
-    setSessions(u);
-    await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(u));
-    const us = subjects.map(s => s.id === curSub.id ? {...s, totalMins: s.totalMins+mins} : s);
-    setSubjects(us);
-    await AsyncStorage.setItem(SUBJECTS_KEY, JSON.stringify(us));
+    
+    logStudySession(sess, curSub);
     setSHours('1'); setSMins('0'); setSNote(''); setShowLog(false);
   };
 
-  const addExam = async () => {
+  const addExam = () => {
     if (!examForm.name.trim() || !examForm.date.trim()) return;
-    const u = [...exams, {...examForm, id: Date.now().toString()}].sort((a,b) => new Date(a.date)-new Date(b.date));
-    setExams(u);
-    await AsyncStorage.setItem(EXAMS_KEY, JSON.stringify(u));
+    const newEx = { ...examForm, id: Date.now().toString() };
+    addExamZustand(newEx);
     setExamForm({name:'',subject:'',date:'',notes:''}); setShowExam(false);
-  };
-
-  const deleteExam = async id => {
-    const u = exams.filter(e => e.id !== id);
-    setExams(u);
-    await AsyncStorage.setItem(EXAMS_KEY, JSON.stringify(u));
   };
 
   const daysLeft = d => { try { return differenceInDays(new Date(d), new Date()); } catch { return null; } };
@@ -112,59 +108,61 @@ export default function StudyScreen() {
       {/* ─── JOURNAL ─── */}
       {tab==='journal' && (
         <ScrollView contentContainerStyle={{paddingBottom:100}} showsVerticalScrollIndicator={false}>
-          <View style={s.jHeader}>
+          <Animated.View style={s.jHeader} entering={FadeInDown}>
             <View><Text style={s.jDate}>{format(new Date(),'EEEE, MMMM d')}</Text><Text style={s.jSub}>Daily Journal</Text></View>
-            {jSaved && <View style={s.savedBadge}><Text style={s.savedTxt}>✓ Saved</Text></View>}
-          </View>
+            {jSaved && <Animated.View entering={FadeIn} style={s.savedBadge}><Text style={s.savedTxt}>✓ Saved</Text></Animated.View>}
+          </Animated.View>
 
-          <View style={s.modeRow}>
+          <Animated.View style={s.modeRow} entering={FadeInDown.delay(100)}>
             {[['morning','🌅 Morning'],['night','🌙 Night']].map(([k,l])=>(
               <TouchableOpacity key={k} style={[s.modeBtn, jMode===k && s.modeBtnA]} onPress={()=>setJMode(k)}>
                 <Text style={[s.modeTxt, jMode===k && s.modeTxtA]}>{l}</Text>
               </TouchableOpacity>
             ))}
-          </View>
+          </Animated.View>
 
-          <View style={s.promptCard}>
+          <Animated.View style={s.promptCard} entering={FadeInDown.delay(200)}>
             {PROMPTS[jMode].map((q,i)=>(
               <View key={i} style={s.promptRow}>
                 <View style={s.promptNum}><Text style={s.promptNumTxt}>{i+1}</Text></View>
                 <View style={{flex:1}}>
                   <Text style={s.promptQ}>{q}</Text>
-                  <TextInput style={s.promptIn} value={jData[jMode][i]}
-                    onChangeText={t=>{ const a=[...jData[jMode]]; a[i]=t; setJData(p=>({...p,[jMode]:a})); setJSaved(false); }}
+                  <TextInput style={s.promptIn} value={jData[jMode]?.[i]||''}
+                    onChangeText={t=>{ const a=[...(jData[jMode]||['','',''])]; a[i]=t; setJData(p=>({...p,[jMode]:a})); setJSaved(false); }}
                     placeholder="Write your answer..." placeholderTextColor={Colors.textMuted} multiline />
                 </View>
               </View>
             ))}
-          </View>
+          </Animated.View>
 
-          <TouchableOpacity style={s.saveBtn2} onPress={saveJournal}>
-            <Text style={s.saveBtnTxt}>💾 Save Journal Entry</Text>
-          </TouchableOpacity>
+          <Animated.View entering={FadeInDown.delay(300)}>
+            <TouchableOpacity style={s.saveBtn2} onPress={saveJournal}>
+              <Text style={s.saveBtnTxt}>💾 Save Journal Entry</Text>
+            </TouchableOpacity>
+          </Animated.View>
 
-          <View style={s.brainCard}>
+          <Animated.View style={s.brainCard} entering={FadeInDown.delay(400)}>
             <Text style={s.brainTitle}>🧠 Brain Dump</Text>
             <Text style={s.brainSub}>Dump everything on your mind freely</Text>
             <TextInput style={s.brainIn} value={jData.braindump||''}
               onChangeText={t=>{setJData(p=>({...p,braindump:t}));setJSaved(false);}}
               placeholder="Start typing anything..." placeholderTextColor={Colors.textMuted}
               multiline numberOfLines={5} />
-          </View>
+          </Animated.View>
         </ScrollView>
       )}
 
       {/* ─── STUDY TRACKER ─── */}
       {tab==='study' && (
         <ScrollView contentContainerStyle={{paddingBottom:100}} showsVerticalScrollIndicator={false}>
-          <View style={s.overview}>
+          <Animated.View style={s.overview} entering={FadeInDown}>
             {[[fmtMins(todayMins),'today',Colors.primary],[fmtMins(totalMins),'total',Colors.green],[`${subjects.length}`,'subjects',Colors.amber]].map(([v,l,c])=>(
               <View key={l} style={s.overviewChip}>
                 <Text style={[s.overviewVal,{color:c}]}>{v}</Text>
                 <Text style={s.overviewKey}>{l}</Text>
               </View>
             ))}
-          </View>
+          </Animated.View>
 
           <View style={s.secRow}>
             <Text style={s.secTitle}>SUBJECTS</Text>
@@ -172,40 +170,42 @@ export default function StudyScreen() {
           </View>
 
           {subjects.length===0 && (
-            <View style={s.empty}>
+            <Animated.View style={s.empty} entering={FadeIn}>
               <Text style={{fontSize:36}}>📚</Text>
               <Text style={s.emptyTxt}>No subjects yet</Text>
               <TouchableOpacity style={s.emptyBtn} onPress={()=>setShowSub(true)}><Text style={s.emptyBtnTxt}>Add first subject</Text></TouchableOpacity>
-            </View>
+            </Animated.View>
           )}
 
-          {subjects.map(sub => {
+          {subjects.map((sub, idx) => {
             const todayS = sessions.filter(s=>s.subjectId===sub.id&&s.dateKey===today).reduce((t,s)=>t+s.mins,0);
             return (
-              <TouchableOpacity key={sub.id} style={[s.subCard,{borderLeftColor:sub.color,borderLeftWidth:4}]}
-                onPress={()=>{setCurSub(sub);setShowLog(true);}}>
-                <View style={{flex:1}}>
-                  <Text style={s.subName}>{sub.name}</Text>
-                  <View style={{flexDirection:'row',gap:12,marginTop:3}}>
-                    <Text style={s.subMeta}>Total: {fmtMins(sub.totalMins)}</Text>
-                    {todayS>0&&<Text style={[s.subMeta,{color:sub.color}]}>Today: {fmtMins(todayS)}</Text>}
+              <Animated.View key={sub.id} entering={FadeInDown.delay(idx*50)} layout={Layout.springify()}>
+                <TouchableOpacity style={[s.subCard,{borderLeftColor:sub.color,borderLeftWidth:4}]}
+                  onPress={()=>{setCurSub(sub);setShowLog(true);}}>
+                  <View style={{flex:1}}>
+                    <Text style={s.subName}>{sub.name}</Text>
+                    <View style={{flexDirection:'row',gap:12,marginTop:3}}>
+                      <Text style={s.subMeta}>Total: {fmtMins(sub.totalMins)}</Text>
+                      {todayS>0&&<Text style={[s.subMeta,{color:sub.color}]}>Today: {fmtMins(todayS)}</Text>}
+                    </View>
                   </View>
-                </View>
-                <View style={[s.logBtn,{backgroundColor:sub.color+'22',borderColor:sub.color+'60'}]}>
-                  <Text style={[s.logBtnTxt,{color:sub.color}]}>+ Log</Text>
-                </View>
-              </TouchableOpacity>
+                  <View style={[s.logBtn,{backgroundColor:sub.color+'22',borderColor:sub.color+'60'}]}>
+                    <Text style={[s.logBtnTxt,{color:sub.color}]}>+ Log</Text>
+                  </View>
+                </TouchableOpacity>
+              </Animated.View>
             );
           })}
 
           {sessions.length>0 && <>
             <Text style={[s.secTitle,{marginHorizontal:Spacing.lg,marginTop:Spacing.lg,marginBottom:Spacing.sm}]}>RECENT SESSIONS</Text>
-            {sessions.slice(0,8).map(ss=>(
-              <View key={ss.id} style={s.sessRow}>
+            {sessions.slice(0,8).map((ss, idx)=>(
+              <Animated.View key={ss.id} style={s.sessRow} entering={FadeInDown.delay(100+idx*30)}>
                 <View style={[s.sessDot,{backgroundColor:ss.color}]}/>
                 <View style={{flex:1}}><Text style={s.sessSubj}>{ss.subject}</Text>{!!ss.note&&<Text style={s.sessNote}>{ss.note}</Text>}</View>
                 <View style={{alignItems:'flex-end'}}><Text style={[s.sessDur,{color:ss.color}]}>{fmtMins(ss.mins)}</Text><Text style={s.sessDate}>{ss.date}</Text></View>
-              </View>
+              </Animated.View>
             ))}
           </>}
         </ScrollView>
@@ -220,19 +220,19 @@ export default function StudyScreen() {
           </View>
 
           {exams.length===0 && (
-            <View style={s.empty}>
+            <Animated.View style={s.empty} entering={FadeIn}>
               <Text style={{fontSize:40}}>📅</Text>
               <Text style={s.emptyTxt}>No exams added yet</Text>
               <TouchableOpacity style={s.emptyBtn} onPress={()=>setShowExam(true)}><Text style={s.emptyBtnTxt}>Add your first exam</Text></TouchableOpacity>
-            </View>
+            </Animated.View>
           )}
 
-          {exams.map(exam => {
+          {exams.map((exam, idx) => {
             const d = daysLeft(exam.date);
             const c = urgency(d);
             const past = d!==null&&d<0;
             return (
-              <View key={exam.id} style={[s.examCard,{borderColor:c+'44'}]}>
+              <Animated.View key={exam.id} style={[s.examCard,{borderColor:c+'44'}]} entering={FadeInDown.delay(idx*50)} layout={Layout.springify()}>
                 <View style={[s.examBadge,{backgroundColor:c+'15'}]}>
                   <Text style={[s.examDays,{color:c}]}>{past?'✓':d===0?'NOW':`${d}`}</Text>
                   <Text style={[s.examDaysSub,{color:c}]}>{past?'done':d===0?'today':'days'}</Text>
@@ -246,7 +246,7 @@ export default function StudyScreen() {
                 <TouchableOpacity onPress={()=>deleteExam(exam.id)}>
                   <Text style={{color:Colors.textMuted,fontSize:22,paddingLeft:8}}>×</Text>
                 </TouchableOpacity>
-              </View>
+              </Animated.View>
             );
           })}
         </ScrollView>

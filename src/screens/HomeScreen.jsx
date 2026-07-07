@@ -1,18 +1,17 @@
 // src/screens/HomeScreen.jsx — FINAL VERSION
 // EDITH glass UI + XP/Level system + Quest cards + Pentagon radar + Notifications
+// Upgraded to Zustand & React Native Reanimated
 
 import React, { useState, useEffect, useCallback } from 'react';
 import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import Animated, { FadeInDown, FadeIn, Layout, withSpring, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { useHabits } from '../hooks/useHabits';
+import { useStore } from '../store/useStore';
 import { Colors, Spacing, Radius, Typography } from '../theme';
 import { getLevelInfo, calcRadarScores, RADAR_AXES, RADAR_COLORS, LEVELS } from '../utils/xpSystem';
 import { scheduleAllHabitNotifications, scheduleMorningSummary, scheduleEveningNudge } from '../utils/notifications';
-
-const XP_KEY = 'hf_total_xp';
-const STREAK_KEY = 'hf_streak_days';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -22,33 +21,33 @@ function getGreeting() {
 }
 
 export default function HomeScreen() {
-  const { habits, todayLog, loading, toggleHabit, completedToday, totalHabits, completionPct, getLogForDate } = useHabits();
-  const [weekLogs, setWeekLogs]   = useState({});
+  const { habits, todayLog, loading, toggleHabit, completedToday, totalHabits, completionPct } = useHabits();
   const [activeTab, setActiveTab] = useState('today');
-  const [totalXP, setTotalXP]     = useState(0);
-  const [streak, setStreak]       = useState(1);
   const [radarScores, setRadarScores] = useState({});
   const [notifSetup, setNotifSetup]   = useState(false);
+
+  // Zustand
+  const totalXP = useStore(state => state.totalXP);
+  const streak = useStore(state => state.streak);
+  const logs = useStore(state => state.logs);
 
   const today     = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
   const weekDays  = eachDayOfInterval({ start: weekStart, end: endOfWeek(today, { weekStartsOn: 1 }) });
   const todayStr  = format(today, 'yyyy-MM-dd');
 
-  useEffect(() => {
-    AsyncStorage.getItem(XP_KEY).then(v => { if (v) setTotalXP(parseInt(v)); });
-    AsyncStorage.getItem(STREAK_KEY).then(v => { if (v) setStreak(parseInt(v)); });
-  }, []);
+  // Calculate radar and week logs from Zustand state
+  const weekLogs = {};
+  weekDays.forEach(d => {
+    const key = format(d, 'yyyy-MM-dd');
+    weekLogs[key] = logs[key] || {};
+  });
 
   useEffect(() => {
-    if (!habits.length) return;
-    Promise.all(weekDays.map(d => getLogForDate(d).then(log => [format(d,'yyyy-MM-dd'), log])))
-      .then(entries => {
-        const logs = Object.fromEntries(entries);
-        setWeekLogs(logs);
-        setRadarScores(calcRadarScores(habits, logs));
-      });
-  }, [habits.length, todayLog]);
+    if (habits.length) {
+      setRadarScores(calcRadarScores(habits, weekLogs));
+    }
+  }, [habits.length, logs]);
 
   useEffect(() => {
     if (habits.length && !notifSetup) {
@@ -59,16 +58,9 @@ export default function HomeScreen() {
     }
   }, [habits.length]);
 
-  const handleToggle = useCallback(async (habitId) => {
-    const wasDone = !!todayLog[habitId];
+  const handleToggle = useCallback((habitId) => {
     toggleHabit(habitId);
-    if (!wasDone) {
-      const xpEarned = streak >= 7 ? 40 : streak >= 3 ? 30 : 20;
-      const newXP = totalXP + xpEarned;
-      setTotalXP(newXP);
-      await AsyncStorage.setItem(XP_KEY, newXP.toString());
-    }
-  }, [todayLog, totalXP, streak, toggleHabit]);
+  }, [toggleHabit]);
 
   const levelInfo = getLevelInfo(totalXP);
   const weekTotal = weekDays.reduce((sum, d) => {
@@ -78,6 +70,16 @@ export default function HomeScreen() {
   const weekPct = (habits.length * weekDays.length) > 0
     ? Math.round(weekTotal / (habits.length * weekDays.length) * 100) : 0;
 
+  // Animated XP Bar
+  const animatedXPWidth = useSharedValue(levelInfo.progress);
+  useEffect(() => {
+    animatedXPWidth.value = withSpring(levelInfo.progress, { damping: 15, stiffness: 90 });
+  }, [levelInfo.progress]);
+
+  const animatedXPStyle = useAnimatedStyle(() => ({
+    width: `${animatedXPWidth.value * 100}%`
+  }));
+
   if (loading) return <View style={s.loading}><ActivityIndicator color={Colors.primary} size="large"/></View>;
 
   return (
@@ -85,7 +87,7 @@ export default function HomeScreen() {
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{paddingBottom:100}}>
 
         {/* Header */}
-        <View style={s.header}>
+        <Animated.View style={s.header} entering={FadeIn.delay(100)}>
           <View>
             <Text style={s.greeting}>{getGreeting()} 👋</Text>
             <Text style={s.date}>{format(today,'EEEE, MMMM d')}</Text>
@@ -94,10 +96,10 @@ export default function HomeScreen() {
             <Text style={s.streakFire}>🔥</Text>
             <Text style={s.streakLabel}>Day {streak}</Text>
           </View>
-        </View>
+        </Animated.View>
 
         {/* XP Card */}
-        <View style={s.xpCard}>
+        <Animated.View style={s.xpCard} entering={FadeInDown.delay(200).springify()}>
           <View style={s.xpTopRow}>
             <View>
               <Text style={s.levelName}>⚔ {levelInfo.current.name.toUpperCase()}</Text>
@@ -108,7 +110,7 @@ export default function HomeScreen() {
             </View>
           </View>
           <View style={s.xpBarTrack}>
-            <View style={[s.xpBarFill, {width:`${levelInfo.progress*100}%`, backgroundColor:levelInfo.current.color}]}/>
+            <Animated.View style={[s.xpBarFill, { backgroundColor: levelInfo.current.color }, animatedXPStyle]}/>
           </View>
           <View style={s.xpBarRow}>
             <Text style={[s.xpBarLabel,{color:levelInfo.current.color}]}>{totalXP} XP</Text>
@@ -122,22 +124,22 @@ export default function HomeScreen() {
             ))}
             <Text style={s.pipLabel}>{levelInfo.next ? `→ ${levelInfo.next.name}` : '🏆 MAX'}</Text>
           </View>
-        </View>
+        </Animated.View>
 
         {/* Streak bonus */}
         {streak >= 3 && (
-          <View style={s.bonusBanner}>
+          <Animated.View style={s.bonusBanner} entering={FadeInDown.delay(300)}>
             <Text style={{fontSize:18}}>🔥</Text>
             <View style={{flex:1,marginLeft:Spacing.sm}}>
               <Text style={s.bonusTitle}>{streak>=7?'7-Day Streak! 2x XP Active':'3-Day Streak! 1.5x XP Active'}</Text>
               <Text style={s.bonusSub}>Bonus XP on all completions today</Text>
             </View>
             <Text style={s.bonusMult}>{streak>=7?'x2':'x1.5'}</Text>
-          </View>
+          </Animated.View>
         )}
 
         {/* Overview chips */}
-        <View style={s.overviewRow}>
+        <Animated.View style={s.overviewRow} entering={FadeInDown.delay(400)}>
           <View style={s.overviewChip}>
             <Text style={[s.overviewVal,{color:Colors.primary}]}>{completedToday}/{totalHabits}</Text>
             <Text style={s.overviewKey}>today</Text>
@@ -150,7 +152,7 @@ export default function HomeScreen() {
             <Text style={[s.overviewVal,{color:Colors.amber}]}>{streak}</Text>
             <Text style={s.overviewKey}>day streak</Text>
           </View>
-        </View>
+        </Animated.View>
 
         {/* Tabs */}
         <View style={s.tabRow}>
@@ -165,48 +167,50 @@ export default function HomeScreen() {
         {activeTab==='today' && (
           <>
             <Text style={s.sectionTitle}>DAILY QUESTS</Text>
-            {habits.map(habit => {
+            {habits.map((habit, idx) => {
               const done = !!todayLog[habit.id];
               const xpVal = streak>=7?40:streak>=3?30:20;
               return (
-                <TouchableOpacity key={habit.id}
-                  style={[s.questCard, done&&s.questCardDone]}
-                  onPress={()=>handleToggle(habit.id)} activeOpacity={0.8}>
-                  <View style={[s.questIcon,{backgroundColor:habit.color+'18',borderColor:habit.color+'40'}]}>
-                    <Text style={{fontSize:22}}>{habit.icon}</Text>
-                  </View>
-                  <View style={{flex:1}}>
-                    <Text style={[s.questName, done&&s.questNameDone]}>{habit.name}</Text>
-                    <View style={s.questMeta}>
-                      <Text style={s.questTime}>⏰ {habit.reminderTime}</Text>
-                      <View style={[s.questDot,{backgroundColor:done?Colors.primary:Colors.textMuted}]}/>
-                      <Text style={[s.questStatus,{color:done?Colors.primary:Colors.textMuted}]}>{done?'Done':'Pending'}</Text>
+                <Animated.View key={habit.id} entering={FadeInDown.delay(100 + idx * 50)} layout={Layout.springify()}>
+                  <TouchableOpacity
+                    style={[s.questCard, done&&s.questCardDone]}
+                    onPress={()=>handleToggle(habit.id)} activeOpacity={0.8}>
+                    <View style={[s.questIcon,{backgroundColor:habit.color+'18',borderColor:habit.color+'40'}]}>
+                      <Text style={{fontSize:22}}>{habit.icon}</Text>
                     </View>
-                  </View>
-                  <View style={s.questRight}>
-                    <Text style={[s.questXP,{color:done?Colors.primary:Colors.textMuted}]}>+{xpVal}XP</Text>
-                    <View style={[s.checkBox, done&&{backgroundColor:Colors.primary,borderColor:Colors.primary}]}>
-                      {done&&<Text style={s.checkMark}>✓</Text>}
+                    <View style={{flex:1}}>
+                      <Text style={[s.questName, done&&s.questNameDone]}>{habit.name}</Text>
+                      <View style={s.questMeta}>
+                        <Text style={s.questTime}>⏰ {habit.reminderTime}</Text>
+                        <View style={[s.questDot,{backgroundColor:done?Colors.primary:Colors.textMuted}]}/>
+                        <Text style={[s.questStatus,{color:done?Colors.primary:Colors.textMuted}]}>{done?'Done':'Pending'}</Text>
+                      </View>
                     </View>
-                  </View>
-                </TouchableOpacity>
+                    <View style={s.questRight}>
+                      <Text style={[s.questXP,{color:done?Colors.primary:Colors.textMuted}]}>+{xpVal}XP</Text>
+                      <View style={[s.checkBox, done&&{backgroundColor:Colors.primary,borderColor:Colors.primary}]}>
+                        {done&&<Text style={s.checkMark}>✓</Text>}
+                      </View>
+                    </View>
+                  </TouchableOpacity>
+                </Animated.View>
               );
             })}
             {completedToday===totalHabits&&totalHabits>0&&(
-              <View style={s.perfectCard}>
+              <Animated.View style={s.perfectCard} entering={FadeInDown.springify()}>
                 <Text style={{fontSize:32}}>🏆</Text>
                 <View style={{marginLeft:Spacing.md}}>
                   <Text style={s.perfectTitle}>Perfect Day!</Text>
                   <Text style={s.perfectSub}>All quests done. Bonus XP earned!</Text>
                 </View>
-              </View>
+              </Animated.View>
             )}
           </>
         )}
 
         {/* WEEK VIEW */}
         {activeTab==='week' && (
-          <>
+          <Animated.View entering={FadeIn}>
             <Text style={s.sectionTitle}>WEEKLY OVERVIEW</Text>
             <View style={s.weekGrid}>
               <View style={s.gridRow}>
@@ -261,12 +265,12 @@ export default function HomeScreen() {
                 <View style={s.gridPctCol}><Text style={[s.gridPct,{color:Colors.primary}]}>{weekPct}%</Text></View>
               </View>
             </View>
-          </>
+          </Animated.View>
         )}
 
         {/* RADAR TAB */}
         {activeTab==='radar' && (
-          <>
+          <Animated.View entering={FadeIn}>
             <Text style={s.sectionTitle}>PRODUCTIVITY RADAR</Text>
             <View style={s.radarCard}>
               <Text style={s.radarOverall}>
@@ -300,7 +304,7 @@ export default function HomeScreen() {
                 Complete habits daily to raise each axis ↑
               </Text>
             </View>
-          </>
+          </Animated.View>
         )}
 
       </ScrollView>

@@ -1,18 +1,20 @@
 // WeeklyReviewScreen.jsx — Phase 3
 // Weekly Review + Motivational Quote + Share Streak
+// Upgraded to Zustand & React Native Reanimated
 
 import React, { useState, useEffect } from 'react';
 import {
   View, Text, ScrollView, TouchableOpacity,
-  StyleSheet, TextInput, Modal, Share, Alert
+  StyleSheet, TextInput, Share, Alert
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format, startOfWeek, endOfWeek, eachDayOfInterval, subWeeks } from 'date-fns';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import Animated, { FadeIn, FadeInDown, Layout } from 'react-native-reanimated';
 import { Colors, Spacing, Radius, Typography } from '../theme';
 import { useHabits } from '../hooks/useHabits';
+import { useStore } from '../store/useStore';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const REVIEW_KEY = 'hf_weekly_review_';
 const QUOTE_KEY  = 'hf_daily_quote_';
 
 // 30 student-focused motivational quotes
@@ -59,12 +61,17 @@ const REVIEW_QUESTIONS = [
 ];
 
 export default function WeeklyReviewScreen() {
-  const { habits, getLogForDate, completedToday, totalHabits } = useHabits();
+  const { habits, completedToday, totalHabits } = useHabits();
   const [activeTab, setActiveTab] = useState('quote');
 
+  // Zustand
+  const streakCount = useStore(state => state.streak);
+  const logs = useStore(state => state.logs);
+  const reviews = useStore(state => state.reviews);
+  const saveReviewZustand = useStore(state => state.saveReview);
+
   // Quote
-  const [quote, setQuote]         = useState(null);
-  const [quoteRefreshed, setQR]   = useState(false);
+  const [quote, setQuote] = useState(null);
 
   // Weekly Review
   const today     = new Date();
@@ -72,9 +79,6 @@ export default function WeeklyReviewScreen() {
   const weekKey   = format(weekStart, 'yyyy-MM-dd');
   const [reviewData, setReviewData] = useState({});
   const [reviewSaved, setReviewSaved] = useState(false);
-  const [weekStats, setWeekStats]     = useState({ done: 0, total: 0, pct: 0 });
-  const [showShareModal, setShowShareModal] = useState(false);
-  const [streakCount, setStreakCount] = useState(1);
 
   // Load quote of the day
   useEffect(() => {
@@ -90,41 +94,27 @@ export default function WeeklyReviewScreen() {
     });
   }, []);
 
-  // Load review
+  // Sync review data from Zustand
   useEffect(() => {
-    AsyncStorage.getItem(REVIEW_KEY + weekKey).then(d => {
-      if (d) { setReviewData(JSON.parse(d)); setReviewSaved(true); }
-    });
-  }, []);
+    if (reviews[weekKey]) {
+      setReviewData(reviews[weekKey]);
+      setReviewSaved(true);
+    }
+  }, [reviews, weekKey]);
 
   // Calculate week stats
-  useEffect(() => {
-    if (!habits.length) return;
-    const days = eachDayOfInterval({ start: weekStart, end: today });
-    Promise.all(days.map(d => getLogForDate(d).then(log => log)))
-      .then(logs => {
-        const done  = logs.reduce((sum, log) => sum + habits.filter(h => log[h.id]).length, 0);
-        const total = habits.length * days.length;
-        setWeekStats({ done, total, pct: total ? Math.round(done/total*100) : 0 });
-      });
+  const days = eachDayOfInterval({ start: weekStart, end: today });
+  const done = days.reduce((sum, d) => {
+    const k = format(d, 'yyyy-MM-dd');
+    const dayLog = logs[k] || {};
+    return sum + habits.filter(h => dayLog[h.id]).length;
+  }, 0);
+  const total = habits.length * days.length;
+  const pct = total ? Math.round(done / total * 100) : 0;
+  const weekStats = { done, total, pct };
 
-    // Calculate streak
-    let streak = 0;
-    const checkStreak = async () => {
-      for (let i = 0; i < 30; i++) {
-        const d = new Date(); d.setDate(d.getDate() - i);
-        const log = await getLogForDate(d);
-        const done = habits.filter(h => log[h.id]).length;
-        if (done > 0) streak++;
-        else break;
-      }
-      setStreakCount(streak);
-    };
-    checkStreak();
-  }, [habits.length]);
-
-  const saveReview = async () => {
-    await AsyncStorage.setItem(REVIEW_KEY + weekKey, JSON.stringify(reviewData));
+  const saveReview = () => {
+    saveReviewZustand(weekKey, reviewData);
     setReviewSaved(true);
     Alert.alert('Saved! 📋', 'Weekly review saved.');
   };
@@ -132,14 +122,11 @@ export default function WeeklyReviewScreen() {
   const refreshQuote = () => {
     const newIdx = Math.floor(Math.random() * QUOTES.length);
     setQuote(QUOTES[newIdx]);
-    setQR(true);
   };
 
   const shareStreak = async () => {
     const text = `🔥 Day ${streakCount} streak on HabitFlow!\n\nThis week: ${weekStats.pct}% habits completed (${weekStats.done}/${weekStats.total})\n\nHabits I'm crushing:\n${habits.slice(0,5).map(h => `${h.icon} ${h.name}`).join('\n')}\n\n#HabitFlow #Consistency #StudentLife`;
-    try {
-      await Share.share({ message: text, title: 'My HabitFlow Streak' });
-    } catch {}
+    try { await Share.share({ message: text, title: 'My HabitFlow Streak' }); } catch {}
   };
 
   const shareQuote = async () => {
@@ -148,20 +135,14 @@ export default function WeeklyReviewScreen() {
     try { await Share.share({ message: text }); } catch {}
   };
 
-  // Past reviews
-  const [pastReviews, setPastReviews] = useState([]);
-  useEffect(() => {
-    const loadPast = async () => {
-      const keys = [];
-      for (let i = 1; i <= 4; i++) {
-        const wk = format(startOfWeek(subWeeks(today, i), { weekStartsOn: 1 }), 'yyyy-MM-dd');
-        const d = await AsyncStorage.getItem(REVIEW_KEY + wk);
-        if (d) keys.push({ week: wk, data: JSON.parse(d) });
-      }
-      setPastReviews(keys);
-    };
-    loadPast();
-  }, [reviewSaved]);
+  // Past reviews calculation
+  const pastReviews = [];
+  for (let i = 1; i <= 4; i++) {
+    const wk = format(startOfWeek(subWeeks(today, i), { weekStartsOn: 1 }), 'yyyy-MM-dd');
+    if (reviews[wk]) {
+      pastReviews.push({ week: wk, data: reviews[wk] });
+    }
+  }
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -183,7 +164,7 @@ export default function WeeklyReviewScreen() {
 
           {/* Big quote card */}
           {quote && (
-            <View style={s.quoteCard}>
+            <Animated.View style={s.quoteCard} entering={FadeInDown.springify()}>
               <Text style={s.quoteDecor}>"</Text>
               <Text style={s.quoteText}>{quote.text}</Text>
               <Text style={s.quoteAuthor}>— {quote.author}</Text>
@@ -195,12 +176,12 @@ export default function WeeklyReviewScreen() {
                   <Text style={s.quoteBtnPrimaryTxt}>Share ↗</Text>
                 </TouchableOpacity>
               </View>
-            </View>
+            </Animated.View>
           )}
 
           {/* Today's snapshot */}
-          <Text style={s.sectionTitle}>TODAY'S SNAPSHOT</Text>
-          <View style={s.snapshotCard}>
+          <Animated.Text style={s.sectionTitle} entering={FadeIn}>TODAY'S SNAPSHOT</Animated.Text>
+          <Animated.View style={s.snapshotCard} entering={FadeInDown.delay(100)}>
             <View style={s.snapshotRow}>
               <Text style={s.snapshotEmoji}>✅</Text>
               <Text style={s.snapshotLabel}>Habits done</Text>
@@ -218,10 +199,10 @@ export default function WeeklyReviewScreen() {
               <Text style={s.snapshotLabel}>This week</Text>
               <Text style={[s.snapshotVal, { color: Colors.green }]}>{weekStats.pct}%</Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* All quotes list */}
-          <Text style={s.sectionTitle}>QUOTE LIBRARY</Text>
+          <Animated.Text style={s.sectionTitle} entering={FadeIn}>QUOTE LIBRARY</Animated.Text>
           {QUOTES.map((q, i) => (
             <TouchableOpacity key={i} style={s.quoteListItem} onPress={() => setQuote(q)}>
               <Text style={s.quoteListText}>"{q.text}"</Text>
@@ -236,18 +217,18 @@ export default function WeeklyReviewScreen() {
         <ScrollView contentContainerStyle={{paddingBottom:100}} showsVerticalScrollIndicator={false}>
 
           {/* Week header */}
-          <View style={s.weekHeader}>
+          <Animated.View style={s.weekHeader} entering={FadeInDown}>
             <View>
               <Text style={s.weekTitle}>Week of {format(weekStart,'MMM d')}</Text>
               <Text style={s.weekSub}>
                 {format(weekStart,'MMM d')} – {format(endOfWeek(today,{weekStartsOn:1}),'MMM d, yyyy')}
               </Text>
             </View>
-            {reviewSaved && <View style={s.savedBadge}><Text style={s.savedTxt}>✓ Saved</Text></View>}
-          </View>
+            {reviewSaved && <Animated.View entering={FadeIn} style={s.savedBadge}><Text style={s.savedTxt}>✓ Saved</Text></Animated.View>}
+          </Animated.View>
 
           {/* Week stats */}
-          <View style={s.weekStatsRow}>
+          <Animated.View style={s.weekStatsRow} entering={FadeInDown.delay(100)}>
             <View style={s.weekStatChip}>
               <Text style={[s.weekStatVal,{color:Colors.primary}]}>{weekStats.pct}%</Text>
               <Text style={s.weekStatKey}>completion</Text>
@@ -264,30 +245,29 @@ export default function WeeklyReviewScreen() {
               <Text style={[s.weekStatVal,{color:Colors.coral}]}>{streakCount}</Text>
               <Text style={s.weekStatKey}>streak</Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Habit performance this week */}
-          <Text style={s.sectionTitle}>HABIT PERFORMANCE</Text>
-          {habits.map(h => {
-            const days = eachDayOfInterval({ start: weekStart, end: today });
-            const done = 0; // simplified — full calc happens in useEffect
-            const pct = weekStats.pct;
+          <Animated.Text style={s.sectionTitle} entering={FadeIn}>HABIT PERFORMANCE</Animated.Text>
+          {habits.map((h, idx) => {
+            const hDone = days.filter(d => (logs[format(d, 'yyyy-MM-dd')] || {})[h.id]).length;
+            const hPct = days.length ? Math.round(hDone / days.length * 100) : 0;
             return (
-              <View key={h.id} style={s.habitPerfRow}>
+              <Animated.View key={h.id} style={s.habitPerfRow} entering={FadeInDown.delay(150 + idx * 30)}>
                 <Text style={{fontSize:16,width:26}}>{h.icon}</Text>
                 <Text style={s.habitPerfName} numberOfLines={1}>{h.name}</Text>
                 <View style={s.habitPerfBar}>
-                  <View style={[s.habitPerfFill,{width:`${pct}%`,backgroundColor:h.color}]}/>
+                  <View style={[s.habitPerfFill,{width:`${hPct}%`,backgroundColor:h.color}]}/>
                 </View>
-                <Text style={[s.habitPerfPct,{color:h.color}]}>{pct}%</Text>
-              </View>
+                <Text style={[s.habitPerfPct,{color:h.color}]}>{hPct}%</Text>
+              </Animated.View>
             );
           })}
 
           {/* Review questions */}
-          <Text style={s.sectionTitle}>REFLECTION QUESTIONS</Text>
-          {REVIEW_QUESTIONS.map(({ key, icon, q }) => (
-            <View key={key} style={s.reviewQuestion}>
+          <Animated.Text style={s.sectionTitle} entering={FadeIn}>REFLECTION QUESTIONS</Animated.Text>
+          {REVIEW_QUESTIONS.map(({ key, icon, q }, idx) => (
+            <Animated.View key={key} style={s.reviewQuestion} entering={FadeInDown.delay(200 + idx * 40)}>
               <View style={s.reviewQHeader}>
                 <Text style={{fontSize:18}}>{icon}</Text>
                 <Text style={s.reviewQText}>{q}</Text>
@@ -301,16 +281,18 @@ export default function WeeklyReviewScreen() {
                 multiline
                 numberOfLines={3}
               />
-            </View>
+            </Animated.View>
           ))}
 
-          <TouchableOpacity style={s.saveReviewBtn} onPress={saveReview}>
-            <Text style={s.saveReviewTxt}>💾 Save Weekly Review</Text>
-          </TouchableOpacity>
+          <Animated.View entering={FadeInDown.delay(400)}>
+            <TouchableOpacity style={s.saveReviewBtn} onPress={saveReview}>
+              <Text style={s.saveReviewTxt}>💾 Save Weekly Review</Text>
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Past reviews */}
           {pastReviews.length > 0 && (
-            <>
+            <Animated.View entering={FadeInDown.delay(500)}>
               <Text style={s.sectionTitle}>PAST REVIEWS</Text>
               {pastReviews.map((pr, i) => (
                 <View key={i} style={s.pastReviewCard}>
@@ -319,7 +301,7 @@ export default function WeeklyReviewScreen() {
                   {pr.data.goal && <Text style={s.pastReviewItem}>🎯 {pr.data.goal}</Text>}
                 </View>
               ))}
-            </>
+            </Animated.View>
           )}
         </ScrollView>
       )}
@@ -329,7 +311,7 @@ export default function WeeklyReviewScreen() {
         <ScrollView contentContainerStyle={{paddingBottom:100}} showsVerticalScrollIndicator={false}>
 
           {/* Streak card — big shareable */}
-          <View style={s.streakShareCard}>
+          <Animated.View style={s.streakShareCard} entering={FadeInDown.springify()}>
             <View style={s.streakCircle}>
               <Text style={s.streakFireBig}>🔥</Text>
               <Text style={s.streakNumBig}>{streakCount}</Text>
@@ -351,30 +333,34 @@ export default function WeeklyReviewScreen() {
                 <Text style={s.streakStatKey}>habits</Text>
               </View>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Share buttons */}
-          <TouchableOpacity style={s.shareBtn} onPress={shareStreak}>
-            <Text style={{fontSize:20}}>📤</Text>
-            <View style={{flex:1,marginLeft:Spacing.md}}>
-              <Text style={s.shareBtnTitle}>Share your streak</Text>
-              <Text style={s.shareBtnSub}>Send to WhatsApp, Instagram, anywhere</Text>
-            </View>
-            <Text style={{color:Colors.primary,fontWeight:'700'}}>Share</Text>
-          </TouchableOpacity>
+          <Animated.View entering={FadeInDown.delay(100)}>
+            <TouchableOpacity style={s.shareBtn} onPress={shareStreak}>
+              <Text style={{fontSize:20}}>📤</Text>
+              <View style={{flex:1,marginLeft:Spacing.md}}>
+                <Text style={s.shareBtnTitle}>Share your streak</Text>
+                <Text style={s.shareBtnSub}>Send to WhatsApp, Instagram, anywhere</Text>
+              </View>
+              <Text style={{color:Colors.primary,fontWeight:'700'}}>Share</Text>
+            </TouchableOpacity>
+          </Animated.View>
 
-          <TouchableOpacity style={s.shareBtn} onPress={shareQuote}>
-            <Text style={{fontSize:20}}>✨</Text>
-            <View style={{flex:1,marginLeft:Spacing.md}}>
-              <Text style={s.shareBtnTitle}>Share today's quote</Text>
-              <Text style={s.shareBtnSub}>Inspire your classmates</Text>
-            </View>
-            <Text style={{color:Colors.primary,fontWeight:'700'}}>Share</Text>
-          </TouchableOpacity>
+          <Animated.View entering={FadeInDown.delay(150)}>
+            <TouchableOpacity style={s.shareBtn} onPress={shareQuote}>
+              <Text style={{fontSize:20}}>✨</Text>
+              <View style={{flex:1,marginLeft:Spacing.md}}>
+                <Text style={s.shareBtnTitle}>Share today's quote</Text>
+                <Text style={s.shareBtnSub}>Inspire your classmates</Text>
+              </View>
+              <Text style={{color:Colors.primary,fontWeight:'700'}}>Share</Text>
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Challenge a friend */}
-          <Text style={s.sectionTitle}>CHALLENGE A FRIEND</Text>
-          <View style={s.challengeCard}>
+          <Animated.Text style={s.sectionTitle} entering={FadeIn}>CHALLENGE A FRIEND</Animated.Text>
+          <Animated.View style={s.challengeCard} entering={FadeInDown.delay(200)}>
             <Text style={s.challengeTitle}>🤝 Accountability Partner</Text>
             <Text style={s.challengeSub}>Challenge a classmate to match your streak. Healthy competition = better results.</Text>
             <TouchableOpacity style={s.challengeBtn} onPress={async () => {
@@ -383,11 +369,11 @@ export default function WeeklyReviewScreen() {
             }}>
               <Text style={s.challengeBtnTxt}>🎯 Send Challenge</Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
           {/* Weekly report card */}
-          <Text style={s.sectionTitle}>YOUR WEEKLY REPORT CARD</Text>
-          <View style={s.reportCard}>
+          <Animated.Text style={s.sectionTitle} entering={FadeIn}>YOUR WEEKLY REPORT CARD</Animated.Text>
+          <Animated.View style={s.reportCard} entering={FadeInDown.delay(300)}>
             <View style={s.reportGrade}>
               <Text style={[s.gradeText, {
                 color: weekStats.pct >= 80 ? Colors.green :
@@ -409,7 +395,7 @@ export default function WeeklyReviewScreen() {
               </Text>
               <Text style={s.reportWeek}>Week of {format(weekStart,'MMM d')}</Text>
             </View>
-          </View>
+          </Animated.View>
 
         </ScrollView>
       )}

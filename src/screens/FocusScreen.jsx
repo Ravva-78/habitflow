@@ -1,6 +1,7 @@
 // src/screens/FocusScreen.jsx
 // Focus Timer with FaceDown mode — inspired by FaceDown app
 // Uses expo-sensors Accelerometer to detect phone orientation
+// Upgraded to Zustand & React Native Reanimated
 
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import {
@@ -9,7 +10,8 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format, subDays, eachDayOfInterval } from 'date-fns';
-import AsyncStorage from '@react-native-async-storage/async-storage';
+import Animated, { FadeIn, FadeInDown, useAnimatedStyle, useSharedValue, withSpring, withRepeat, withTiming, Easing } from 'react-native-reanimated';
+import { useStore } from '../store/useStore';
 import { Colors, Spacing, Radius, Typography } from '../theme';
 
 // Try to import Accelerometer — gracefully degrade on web
@@ -27,9 +29,6 @@ const SESSION_TYPES = [
 
 const PRESETS = [5, 10, 15, 25, 30, 45, 50, 60];
 
-const SESSIONS_KEY = 'hf_focus_sessions';
-const TOTAL_KEY    = 'hf_focus_total_mins';
-
 export default function FocusScreen() {
   // Timer state
   const [selectedMins, setSelectedMins] = useState(25);
@@ -39,11 +38,13 @@ export default function FocusScreen() {
   const [faceDownMode, setFaceDownMode] = useState(false);
   const [isFaceDown, setIsFaceDown]     = useState(false);
   const [liftWarning, setLiftWarning]   = useState(0); // countdown 10→0
+  const [activeTab, setActiveTab]       = useState('timer'); // 'timer' | 'stats'
 
-  // Sessions
-  const [sessions, setSessions]   = useState([]);
-  const [totalMins, setTotalMins] = useState(0);
-  const [activeTab, setActiveTab] = useState('timer'); // 'timer' | 'stats'
+  // Zustand
+  const sessions = useStore(state => state.focusSessions);
+  const totalMins = useStore(state => state.focusTotalMins);
+  const focusGrid = useStore(state => state.focusGrid);
+  const addFocusSession = useStore(state => state.addFocusSession);
 
   // Refs
   const timerRef    = useRef(null);
@@ -51,22 +52,16 @@ export default function FocusScreen() {
   const accelRef    = useRef(null);
   const sessionStart = useRef(null);
 
-  // Load sessions on mount
-  useEffect(() => {
-    (async () => {
-      const s = await AsyncStorage.getItem(SESSIONS_KEY);
-      if (s) setSessions(JSON.parse(s));
-      const t = await AsyncStorage.getItem(TOTAL_KEY);
-      if (t) setTotalMins(parseInt(t));
-    })();
-    return () => cleanup();
-  }, []);
-
+  // Cleanups
   const cleanup = () => {
     if (timerRef.current)   clearInterval(timerRef.current);
     if (warningRef.current) clearInterval(warningRef.current);
     if (accelRef.current)   accelRef.current.remove?.();
   };
+
+  useEffect(() => {
+    return () => cleanup();
+  }, []);
 
   // Update timeLeft when preset changes (only if not running)
   useEffect(() => {
@@ -158,20 +153,9 @@ export default function FocusScreen() {
       emoji: sessionType.emoji,
     };
 
-    const updated = [newSession, ...sessions].slice(0, 50);
-    setSessions(updated);
-    await AsyncStorage.setItem(SESSIONS_KEY, JSON.stringify(updated));
-
-    const newTotal = totalMins + mins;
-    setTotalMins(newTotal);
-    await AsyncStorage.setItem(TOTAL_KEY, newTotal.toString());
-
-    // Mark today's focus in daily log
-    const today = format(new Date(), 'yyyy-MM-dd');
-    await AsyncStorage.setItem(`hf_focus_${today}`, (newTotal).toString());
-
+    addFocusSession(newSession);
     setTimeLeft(selectedMins * 60);
-  }, [sessions, sessionType, totalMins, selectedMins]);
+  }, [sessionType, selectedMins, addFocusSession, pauseTimer]);
 
   // Format time as MM:SS
   const fmt = (secs) => {
@@ -180,28 +164,30 @@ export default function FocusScreen() {
     return `${m}:${s}`;
   };
 
-  const progress = 1 - (timeLeft / (selectedMins * 60));
   const totalHours = Math.floor(totalMins / 60);
   const remainMins = totalMins % 60;
 
   // Consistency grid — last 90 days
   const last90 = eachDayOfInterval({ start: subDays(new Date(), 89), end: new Date() });
-  const [focusGrid, setFocusGrid] = useState({});
-
-  useEffect(() => {
-    (async () => {
-      const entries = await Promise.all(
-        last90.map(async d => {
-          const key = `hf_focus_${format(d, 'yyyy-MM-dd')}`;
-          const val = await AsyncStorage.getItem(key);
-          return [format(d, 'yyyy-MM-dd'), val ? parseInt(val) : 0];
-        })
-      );
-      setFocusGrid(Object.fromEntries(entries));
-    })();
-  }, [sessions]);
-
   const months = [...new Set(last90.map(d => format(d, 'MMM')))];
+
+  // Pulse animation for timer when running
+  const pulseScale = useSharedValue(1);
+  useEffect(() => {
+    if (isRunning) {
+      pulseScale.value = withRepeat(
+        withTiming(1.02, { duration: 1000, easing: Easing.inOut(Easing.ease) }),
+        -1,
+        true
+      );
+    } else {
+      pulseScale.value = withTiming(1);
+    }
+  }, [isRunning]);
+
+  const animatedTimerStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: pulseScale.value }]
+  }));
 
   return (
     <SafeAreaView style={s.safe} edges={['top']}>
@@ -232,7 +218,7 @@ export default function FocusScreen() {
           {/* Big circular timer */}
           <View style={s.timerWrap}>
             {/* Outer decorative ring */}
-            <View style={[s.timerRingOuter, { borderColor: sessionType.color + '20' }]}>
+            <Animated.View style={[s.timerRingOuter, { borderColor: sessionType.color + '20' }, animatedTimerStyle]}>
               <View style={[s.timerRingMid, { borderColor: sessionType.color + '40', borderTopColor: sessionType.color }]}>
                 <View style={s.timerInner}>
                   {liftWarning > 0 ? (
@@ -252,43 +238,47 @@ export default function FocusScreen() {
                   )}
                 </View>
               </View>
-            </View>
+            </Animated.View>
 
             {/* Ends at label */}
             {isRunning && (
-              <View style={s.endsAtPill}>
+              <Animated.View style={s.endsAtPill} entering={FadeInDown}>
                 <Text style={s.endsAtText}>
                   ⏰ Ends at {format(new Date(Date.now() + timeLeft * 1000), 'HH:mm')}
                 </Text>
-              </View>
+              </Animated.View>
             )}
           </View>
 
           {/* Preset buttons */}
           <View style={s.presetsGrid}>
-            {PRESETS.map(m => (
-              <TouchableOpacity key={m}
-                style={[s.presetBtn, selectedMins===m && !isRunning && { backgroundColor: sessionType.color, borderColor: sessionType.color }]}
-                onPress={() => { if (!isRunning) setSelectedMins(m); }}
-                disabled={isRunning}>
-                <Text style={[s.presetText, selectedMins===m && !isRunning && { color: Colors.bg }]}>{m}</Text>
-              </TouchableOpacity>
+            {PRESETS.map((m, idx) => (
+              <Animated.View key={m} entering={FadeInDown.delay(idx * 30).springify()}>
+                <TouchableOpacity
+                  style={[s.presetBtn, selectedMins===m && !isRunning && { backgroundColor: sessionType.color, borderColor: sessionType.color }]}
+                  onPress={() => { if (!isRunning) setSelectedMins(m); }}
+                  disabled={isRunning}>
+                  <Text style={[s.presetText, selectedMins===m && !isRunning && { color: Colors.bg }]}>{m}</Text>
+                </TouchableOpacity>
+              </Animated.View>
             ))}
           </View>
 
           {/* FaceDown toggle */}
-          <TouchableOpacity style={[s.faceDownToggle, faceDownMode && { borderColor: sessionType.color, backgroundColor: sessionType.color+'15' }]}
-            onPress={() => setFaceDownMode(!faceDownMode)}>
-            <Text style={{ fontSize: 20 }}>📱</Text>
-            <View style={{ flex: 1, marginLeft: Spacing.md }}>
-              <Text style={[s.faceDownTitle, faceDownMode && { color: sessionType.color }]}>FaceDown mode</Text>
-              <Text style={s.faceDownSub}>Flip phone face-down to start • Lift = 10s warning</Text>
-            </View>
-            <View style={[s.toggleDot, faceDownMode && { backgroundColor: sessionType.color }]} />
-          </TouchableOpacity>
+          <Animated.View entering={FadeInDown.delay(300)}>
+            <TouchableOpacity style={[s.faceDownToggle, faceDownMode && { borderColor: sessionType.color, backgroundColor: sessionType.color+'15' }]}
+              onPress={() => setFaceDownMode(!faceDownMode)}>
+              <Text style={{ fontSize: 20 }}>📱</Text>
+              <View style={{ flex: 1, marginLeft: Spacing.md }}>
+                <Text style={[s.faceDownTitle, faceDownMode && { color: sessionType.color }]}>FaceDown mode</Text>
+                <Text style={s.faceDownSub}>Flip phone face-down to start • Lift = 10s warning</Text>
+              </View>
+              <View style={[s.toggleDot, faceDownMode && { backgroundColor: sessionType.color }]} />
+            </TouchableOpacity>
+          </Animated.View>
 
           {/* Control buttons */}
-          <View style={s.controls}>
+          <Animated.View style={s.controls} entering={FadeInDown.delay(400)}>
             <TouchableOpacity style={s.resetBtn} onPress={resetTimer}>
               <Text style={s.resetBtnText}>↺</Text>
             </TouchableOpacity>
@@ -302,7 +292,7 @@ export default function FocusScreen() {
             <TouchableOpacity style={s.resetBtn} onPress={completeSession} disabled={!isRunning}>
               <Text style={[s.resetBtnText, !isRunning && { color: Colors.textMuted }]}>✓</Text>
             </TouchableOpacity>
-          </View>
+          </Animated.View>
 
         </ScrollView>
       ) : (
@@ -310,7 +300,7 @@ export default function FocusScreen() {
         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ paddingBottom: 100 }}>
 
           {/* Big stat cards */}
-          <View style={s.statsCards}>
+          <Animated.View style={s.statsCards} entering={FadeIn}>
             <View style={[s.statBig, { backgroundColor: '#1A0A0A' }]}>
               <Text style={{ fontSize: 28 }}>🔥</Text>
               <Text style={[s.statBigNum, { color: Colors.coral }]}>{sessions.length > 0 ? 1 : 0}</Text>
@@ -321,10 +311,10 @@ export default function FocusScreen() {
               <Text style={[s.statBigNum, { color: Colors.green }]}>{totalHours}h {remainMins}m</Text>
               <Text style={s.statBigLabel}>Total focus</Text>
             </View>
-          </View>
+          </Animated.View>
 
           {/* Consistency Grid */}
-          <View style={s.gridCard}>
+          <Animated.View style={s.gridCard} entering={FadeInDown.delay(100)}>
             <View style={s.gridHeader}>
               <Text style={s.gridTitle}>Consistency Grid</Text>
               <View style={s.gridLegend}>
@@ -356,21 +346,21 @@ export default function FocusScreen() {
                 </View>
               </View>
             </ScrollView>
-          </View>
+          </Animated.View>
 
           {/* Recent Sessions */}
-          <View style={s.sessionsHeader}>
+          <Animated.View style={s.sessionsHeader} entering={FadeInDown.delay(200)}>
             <Text style={s.sessionsTitle}>Recent Sessions</Text>
-          </View>
+          </Animated.View>
           {sessions.length === 0 && (
-            <View style={s.emptyState}>
+            <Animated.View style={s.emptyState} entering={FadeIn}>
               <Text style={{ fontSize: 40 }}>🎯</Text>
               <Text style={s.emptyText}>No sessions yet</Text>
               <Text style={s.emptySub}>Start your first focus session!</Text>
-            </View>
+            </Animated.View>
           )}
-          {sessions.slice(0, 15).map(session => (
-            <View key={session.id} style={s.sessionRow}>
+          {sessions.slice(0, 15).map((session, idx) => (
+            <Animated.View key={session.id} style={s.sessionRow} entering={FadeInDown.delay(250 + idx * 50)}>
               <View style={[s.sessionTypeBadge, { backgroundColor: session.color + '22', borderColor: session.color + '60' }]}>
                 <Text style={[s.sessionTypeTxt, { color: session.color }]}>{session.label.toUpperCase()}</Text>
               </View>
@@ -381,7 +371,7 @@ export default function FocusScreen() {
               <View style={[s.sessionMins, { backgroundColor: session.color + '22' }]}>
                 <Text style={[s.sessionMinsText, { color: session.color }]}>{session.mins}m</Text>
               </View>
-            </View>
+            </Animated.View>
           ))}
         </ScrollView>
       )}
