@@ -114,7 +114,7 @@ export default function OnboardingScreen({ onComplete }) {
 
             {/* Setup form on last slide */}
             {sl.isSetup && (
-              <View style={s.setupForm}>
+              <ScrollView style={s.setupForm} contentContainerStyle={{ paddingBottom: 120 }} showsVerticalScrollIndicator={false}>
 
                 <Text style={s.fieldLabel}>YOUR NAME</Text>
                 <TextInput
@@ -148,7 +148,7 @@ export default function OnboardingScreen({ onComplete }) {
                   placeholderTextColor={Colors.textMuted}
                   multiline
                 />
-              </View>
+              </ScrollView>
             )}
           </View>
         ))}

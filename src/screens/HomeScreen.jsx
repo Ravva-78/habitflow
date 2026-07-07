@@ -3,7 +3,7 @@
 // Upgraded to Zustand & React Native Reanimated
 
 import React, { useState, useEffect, useCallback } from 'react';
-import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, ScrollView, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { format, startOfWeek, endOfWeek, eachDayOfInterval } from 'date-fns';
 import Animated, { FadeInDown, FadeIn, Layout, withSpring, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
@@ -12,6 +12,7 @@ import { useStore } from '../store/useStore';
 import { Colors, Spacing, Radius, Typography } from '../theme';
 import { getLevelInfo, calcRadarScores, RADAR_AXES, RADAR_COLORS, LEVELS } from '../utils/xpSystem';
 import { scheduleAllHabitNotifications, scheduleMorningSummary, scheduleEveningNudge } from '../utils/notifications';
+import AddHabitModal from '../components/AddHabitModal';
 
 function getGreeting() {
   const h = new Date().getHours();
@@ -25,11 +26,13 @@ export default function HomeScreen() {
   const [activeTab, setActiveTab] = useState('today');
   const [radarScores, setRadarScores] = useState({});
   const [notifSetup, setNotifSetup]   = useState(false);
+  const [showAddModal, setShowAddModal] = useState(false);
 
   // Zustand
   const totalXP = useStore(state => state.totalXP);
   const streak = useStore(state => state.streak);
   const logs = useStore(state => state.logs);
+  const deleteHabit = useStore(state => state.deleteHabit);
 
   const today     = new Date();
   const weekStart = startOfWeek(today, { weekStartsOn: 1 });
@@ -166,7 +169,12 @@ export default function HomeScreen() {
         {/* TODAY — Quest cards */}
         {activeTab==='today' && (
           <>
-            <Text style={s.sectionTitle}>DAILY QUESTS</Text>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: Spacing.lg, marginBottom: Spacing.sm }}>
+              <Text style={{ ...Typography.label, marginBottom: 0 }}>DAILY QUESTS</Text>
+              <TouchableOpacity onPress={() => setShowAddModal(true)} style={{ width: 28, height: 28, borderRadius: 14, backgroundColor: Colors.primaryDim, alignItems: 'center', justifyContent: 'center' }}>
+                <Text style={{ fontSize: 20, color: Colors.primary, lineHeight: 22, fontWeight: '600' }}>+</Text>
+              </TouchableOpacity>
+            </View>
             {habits.map((habit, idx) => {
               const done = !!todayLog[habit.id];
               const xpVal = streak>=7?40:streak>=3?30:20;
@@ -174,7 +182,9 @@ export default function HomeScreen() {
                 <Animated.View key={habit.id} entering={FadeInDown.delay(100 + idx * 50)} layout={Layout.springify()}>
                   <TouchableOpacity
                     style={[s.questCard, done&&s.questCardDone]}
-                    onPress={()=>handleToggle(habit.id)} activeOpacity={0.8}>
+                    onPress={()=>handleToggle(habit.id)}
+                    onLongPress={() => Alert.alert('Delete Quest', `Are you sure you want to delete ${habit.name}?`, [{text:'Cancel',style:'cancel'},{text:'Delete',style:'destructive',onPress:()=>deleteHabit(habit.id)}])}
+                    activeOpacity={0.8}>
                     <View style={[s.questIcon,{backgroundColor:habit.color+'18',borderColor:habit.color+'40'}]}>
                       <Text style={{fontSize:22}}>{habit.icon}</Text>
                     </View>
@@ -308,6 +318,8 @@ export default function HomeScreen() {
         )}
 
       </ScrollView>
+
+      <AddHabitModal visible={showAddModal} onClose={() => setShowAddModal(false)} />
     </SafeAreaView>
   );
 }
