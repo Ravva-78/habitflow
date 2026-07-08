@@ -28,7 +28,7 @@ app.post('/api/coach', async (req, res) => {
       'Always use relevant emojis. Focus on building consistency.';
 
     const model = genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
+      model: 'gemini-2.5-flash',
       systemInstruction: systemInstruction 
     });
 
