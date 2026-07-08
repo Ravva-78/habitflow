@@ -5,6 +5,7 @@
 const IS_PRODUCTION = true;
 
 const DEV_URL  = 'http://10.0.2.2:3000';
-const PROD_URL = 'https://REPLACE_WITH_RENDER_URL_AFTER_DEPLOY.onrender.com';
+const PROD_URL = 'https://habitflow-backend-4xqk.onrender.com';
 
 export const API_BASE_URL = IS_PRODUCTION ? PROD_URL : DEV_URL;
+export const COACH_ENDPOINT = `${API_BASE_URL}/api/coach`;
